@@ -43,3 +43,7 @@ Thumbs.db
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Data (scan outputs, large artifacts) — keep directory via .gitkeep
+data/*
+!data/.gitkeep
