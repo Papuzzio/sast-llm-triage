@@ -1,0 +1,48 @@
+{
+  "labels": [
+    {
+      "finding_index": 13,
+      "check_id": "express-sequelize-injection",
+      "path_relative": "routes/login.ts",
+      "line": 34,
+      "verdict": "true_positive",
+      "confidence": 0.95,
+      "reasoning": "Line 34 constructs a SQL query via template literal interpolation, with req.body.email and security.hash(req.body.password) embedded directly into the query string passed to sequelize.query(). There is no parameterization (no placeholders + replacements), no use of an ORM query builder, and no escape function applied. Because req.body is untrusted input from the login POST, this is a textbook authentication-bypass SQL injection: a payload like ' OR 1=1 -- in the email field would terminate the string literal, match all rows, and comment out the password check.",
+      "labeler": "phillip",
+      "labeled_at": "2026-04-24T19:25:29Z"
+    },
+    {
+      "finding_index": 25,
+      "check_id": "express-check-directory-listing",
+      "path_relative": "server.ts",
+      "line": 281,
+      "verdict": "true_positive",
+      "confidence": 0.9,
+      "reasoning": "Line 281 registers serveIndex('logs', ...) as middleware on the /support/logs route, exposing a browsable directory listing of log files to anyone hitting that URL. Line 282 registers verify.accessControlChallenges() on the same route, but because Express middleware runs in registration order, the directory listing is served by 281 before the auth check on 282 ever executes — the auth is effectively dead code. This is a real-world middleware-ordering vulnerability.",
+      "labeler": "phillip",
+      "labeled_at": "2026-04-24T20:01:40Z"
+    },
+    {
+      "finding_index": 0,
+      "check_id": "detect-non-literal-regexp",
+      "path_relative": "lib/codingChallenges.ts",
+      "line": 76,
+      "verdict": "needs_review",
+      "confidence": 0.5,
+      "reasoning": "Line 76 uses new RegExp(challengeKey) where challengeKey is a parameter of getCodingChallengeFromFileContent. Tracing its origin requires following the call chain across multiple functions in the file — through getCodeChallengesFromFile at line 55 and findFilesWithCodeChallenges at line 18 — to determine whether the value is user-controlled or internal to the application. I was not able to confidently verify the data source within my labeling budget. Without confirming whether an attacker can influence challengeKey, I cannot definitively say whether the ReDoS precondition holds. Escalating to needs_review.",
+      "labeler": "phillip",
+      "labeled_at": "2026-04-24T21:10:22Z"
+    },
+    {
+      "finding_index": 18,
+      "check_id": "code-string-concat",
+      "path_relative": "routes/userProfile.ts",
+      "line": 62,
+      "verdict": "true_positive",
+      "confidence": 0.8,
+      "reasoning": "Line 62 calls eval(code), where code is a substring of the user's own stored username (line 57, sourced from user.username on line 53, which was originally supplied by the user at account creation or profile update). When a user visits their profile and their username matches the #{...} pattern on line 55, the server extracts the inner string and executes it as JavaScript. An attacker can register with a username like #{require('child_process').execSync('whoami')} and trigger arbitrary server-side code execution on their own profile render. The database is not a sanitization boundary — it's storage for whatever was submitted. No escaping or validation is visible between the username source and the eval().",
+      "labeler": "phillip",
+      "labeled_at": "2026-04-24T21:37:57Z"
+    }
+  ]
+}
