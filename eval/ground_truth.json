@@ -43,6 +43,50 @@
       "reasoning": "Line 62 calls eval(code), where code is a substring of the user's own stored username (line 57, sourced from user.username on line 53, which was originally supplied by the user at account creation or profile update). When a user visits their profile and their username matches the #{...} pattern on line 55, the server extracts the inner string and executes it as JavaScript. An attacker can register with a username like #{require('child_process').execSync('whoami')} and trigger arbitrary server-side code execution on their own profile render. The database is not a sanitization boundary — it's storage for whatever was submitted. No escaping or validation is visible between the username source and the eval().",
       "labeler": "phillip",
       "labeled_at": "2026-04-24T21:37:57Z"
+    },
+    {
+      "finding_index": 9,
+      "check_id": "express-res-sendfile",
+      "path_relative": "routes/fileServer.ts",
+      "line": 33,
+      "verdict": "needs_review",
+      "confidence": 0.5,
+      "reasoning": "Line 33 calls res.sendFile(path.resolve('ftp/', file)) where file ultimately originates from params.file (line 16) — untrusted route parameter input. The code applies three defenses before sendFile: forward-slash rejection (line 18), filename extension allowlist (line 27), and null-byte stripping (line 28). The structural ordering (extension check before null-byte strip) and the surrounding code's challenge references (verifySuccessfulPoisonNullByteExploit, nullByteChallenge, forgottenBackupChallenge) strongly suggest an intended bypass exists, likely via null-byte injection in the filename. However, I cannot confirm the exploit works without testing it against the live application. Escalating to needs_review.",
+      "labeler": "phillip",
+      "labeled_at": "2026-04-27T00:01:59Z"
+    },
+    {
+      "finding_index": 14,
+      "check_id": "express-res-sendfile",
+      "path_relative": "routes/quarantineServer.ts",
+      "line": 14,
+      "verdict": "true_positive",
+      "confidence": 0.8,
+      "reasoning": "Line 14 calls res.sendFile(path.resolve('ftp/quarantine/', file)) where file originates from params.file (line 11). The only defense is a forward-slash check on line 13, which prevents directory traversal but does not restrict file extensions or strip null bytes. Compared to the parallel implementation in fileServer.ts (which adds extension allowlisting and null-byte stripping), this handler has materially weaker defenses, allowing arbitrary file disclosure of any contents in the ftp/quarantine/ directory. True positive.",
+      "labeler": "phillip",
+      "labeled_at": "2026-04-27T00:09:12Z"
+    },
+    {
+      "finding_index": 3,
+      "check_id": "hardcoded-jwt-secret",
+      "path_relative": "lib/insecurity.ts",
+      "line": 56,
+      "verdict": "true_positive",
+      "confidence": 0.95,
+      "reasoning": "Line 56 calls jwt.sign(user, privateKey, ...) for JWT signing. Tracing privateKey to its definition on line 23 reveals it is a hardcoded RSA private key embedded as a literal string in the source file. This is a textbook hardcoded secret: anyone with access to the source code (public Git repo, leaked source, insider) can extract the private key and forge valid JWT tokens for any user, including administrators, achieving full authentication bypass. Compare with line 22's publicKey, which is loaded from a file — public keys are non-sensitive by design, so that pattern is appropriate. The private key, in contrast, must be kept secret and should be loaded from an environment variable, secrets manager, or gitignored file at minimum.",
+      "labeler": "phillip",
+      "labeled_at": "2026-04-27T00:21:58Z"
+    },
+    {
+      "finding_index": 15,
+      "check_id": "express-open-redirect",
+      "path_relative": "routes/redirect.ts",
+      "line": 19,
+      "verdict": "needs_review",
+      "confidence": 0.55,
+      "reasoning": "Line 19 calls res.redirect(toUrl) where toUrl originates from query.to (line 15) — untrusted user input from the query string. The redirect is gated by security.isRedirectAllowed(toUrl) on line 16, which is imported from lib/insecurity.ts and not visible in this file. The companion function isUnintendedRedirect (lines 27-32) uses utils.startsWith against security.redirectAllowlist, which suggests the actual gate may use the same pattern — startsWith for URL validation is known to be bypassable via subdomain tricks (e.g., https://allowed.com.attacker.com starts with the allowed prefix but redirects to the attacker). Without inspecting the actual gate function, I cannot confirm whether it has this weakness. Escalating to needs_review.",
+      "labeler": "phillip",
+      "labeled_at": "2026-04-27T00:44:21Z"
     }
   ]
 }
