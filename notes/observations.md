@@ -175,3 +175,104 @@ A variant that gets 5/5 on easy findings but 0/5 on the hard-but-real
 vulnerabilities is worse than one that gets 3/5 on both. We'll want to
 stratify match-rate by finding difficulty (or by ground-truth label
 class) to surface that kind of trade-off.
+
+## Session 5
+
+Built the human-labeled ground-truth set, added a third prompt variant
+(`few_shot`) seeded from those labels, and ran a three-way smoke test on
+finding 0.
+
+### 1. Ground-truth label set: 8 of 26 findings, missing the false-positive class
+
+After two labeling sessions, `eval/ground_truth.json` contains 8 labels
+with the following distribution:
+
+| Verdict          | Count |
+|------------------|-------|
+| `true_positive`  | 5     |
+| `needs_review`   | 3     |
+| `false_positive` | 0     |
+
+**The FP gap is the most important problem with the current label set.**
+With zero labeled false positives, we cannot measure whether the
+pipeline correctly *rejects* spurious findings — only whether it
+correctly accepts real ones. A model that returns `true_positive` on
+every input would score perfectly on TP recall and look great in the
+aggregate metric, while being useless for triage in practice. The
+specificity dimension is invisible until at least one FP lands in the
+labeled set.
+
+Future labeling sessions should prioritize finding likely-FP candidates.
+Promising places to look: the four `express-check-directory-listing`
+firings on `server.ts` (some are on auth-gated routes — possibly safe),
+the `express-res-sendfile` family with intact extension allowlists, and
+the `unsafe-formatstring` INFO-severity finding. Aim for at least 3–5
+labeled FPs before considering the eval set balanced enough to draw
+specificity conclusions from.
+
+### 2. Few-shot variant added, with a class imbalance baked in
+
+Added `PROMPT_VARIANTS["few_shot"]` to `src/triage_engine.py`. The
+template is the baseline prompt with a `BEGIN EXAMPLES` / `END EXAMPLES`
+block inserted between the classification instructions and the finding
+data. The block contains three worked examples drawn directly from
+`eval/ground_truth.json`:
+
+| Example | Verdict          | Source label                   |
+|---------|------------------|--------------------------------|
+| 1       | `needs_review`   | finding 15 (open-redirect)     |
+| 2       | `true_positive`  | finding 3  (hardcoded JWT key) |
+| 3       | `true_positive`  | finding 13 (SQL injection)     |
+
+**No `false_positive` example, because no labeled FP exists.** The
+prompt is therefore demonstrating two of the three possible verdict
+labels. This may bias the model toward TP-or-needs-review and away from
+FP — which would be the wrong inductive bias if the rest of the
+unlabeled findings contain real false positives. Once the label set
+includes at least one good FP, swap one of the two TP examples for it
+to balance the demonstrations.
+
+### 3. Three-variant smoke test on finding 0: same verdict, declining confidence
+
+Ran `triage_finding(results[0], variant=v)` for each `v in
+["baseline", "no_path_bias", "few_shot"]`:
+
+| Variant        | Verdict        | Confidence |
+|----------------|----------------|------------|
+| `baseline`     | `needs_review` | 0.90       |
+| `no_path_bias` | `needs_review` | 0.70       |
+| `few_shot`     | `needs_review` | 0.65       |
+
+All three converged on the verdict that matches the ground-truth label
+(`needs_review`, c=0.50). Confidence dropped monotonically as more
+constraints were added to the prompt.
+
+**N=1 per variant — could be noise.** A real signal would require at
+least 5 trials per variant and a comparison of confidence
+distributions, not point estimates. Filed this as the first hypothesis
+the eval harness should test:
+
+> *Do constraint-heavy prompts (no_path_bias, few_shot) produce more
+> humble (lower-confidence) verdicts on uncertain cases, even when the
+> verdict label itself is unchanged?*
+
+If yes, that's a desirable property — overconfidence on uncertain cases
+is one of the failure modes a human triager would specifically want the
+prompt to suppress. If no, the confidence drop is just noise and the
+extra prompt tokens are buying nothing.
+
+### 4. Path-bias failure mode did not reproduce on any variant
+
+None of the three variants exhibited the Session 3 path-bias verdict
+("juice-shop is intentionally vulnerable so this must be a true
+positive"). The baseline prompt — without any explicit anti-bias
+instruction — correctly identified that `challengeKey`'s definition is
+not visible in the snippet and escalated to `needs_review` on its own.
+
+This reinforces the Session 4 lesson directly. The Session 3
+"observation" of path bias was a single sample from a distribution that
+also produces rigorous reasoning. Any future "the model is biased
+toward X" claim, including ones we make confidently from looking at one
+or two reasoning traces, needs N≥5 trials and a comparison against the
+distribution under a control condition before we should treat it as a
+real property of the prompt.

@@ -9,8 +9,10 @@ validates the response before it's returned.
 Multiple prompt variants live in :data:`PROMPT_VARIANTS` so we can A/B
 test prompt-engineering changes (e.g. whether an explicit instruction to
 ignore file paths suppresses the "this is juice-shop so it must be
-exploitable" bias we observed in Session 3). Callers pick a variant by
-name via the ``variant`` argument to :func:`triage_finding`.
+exploitable" bias we observed in Session 3, or whether seeding the prompt
+with worked examples drawn from the human-labeled ground truth nudges
+the model toward more grounded, line-referenced reasoning). Callers pick
+a variant by name via the ``variant`` argument to :func:`triage_finding`.
 
 This is the per-finding unit of work; the orchestrator (not yet written)
 will loop over all findings and persist verdicts to disk.
@@ -29,7 +31,9 @@ from .triage_schema import TriageVerdict
 # Templates are *plain* strings (not f-strings) with ``{check_id}``,
 # ``{cwe}``, ``{severity}``, ``{message}``, ``{path}``, ``{start_line}``,
 # ``{end_line}``, and ``{snippet}`` placeholders. :func:`triage_finding`
-# fills them via ``str.format``.
+# fills them via ``str.format``. Any literal braces inside a template
+# (e.g. JS template-literal ``${{...}}`` inside a worked example) must
+# be doubled to escape the format machinery.
 
 _BASELINE_PROMPT = """You are an application security (AppSec) engineer triaging output from a Static Application Security Testing (SAST) tool (Semgrep). Classify the following finding as one of:
 - true_positive: a real, exploitable vulnerability
@@ -67,9 +71,55 @@ _NO_PATH_BIAS_PROMPT = _BASELINE_PROMPT.replace(
 )
 
 
+# Worked examples drawn from the human-labeled ground truth in
+# ``eval/ground_truth.json``. They span all three verdict labels and
+# demonstrate line-anchored reasoning, variable-source tracing, and
+# escalation to ``needs_review`` when context is insufficient. The
+# JS template-literal ``${{...}}`` braces in EXAMPLE 3 are doubled so
+# ``str.format`` treats them as literal output.
+_FEW_SHOT_EXAMPLES_BLOCK = """BEGIN EXAMPLES
+Here are three worked examples of correctly triaged findings. Reason in the same style — reference specific lines, trace variables to their sources, escalate to needs_review when context is insufficient.
+
+EXAMPLE 1:
+Rule: express-open-redirect
+File: routes/redirect.ts (line 19)
+Code (excerpt): res.redirect(toUrl) where toUrl = query.to and gated by security.isRedirectAllowed (imported, not visible in this file).
+Verdict: needs_review
+Confidence: 0.55
+Reasoning: The redirect destination originates from query.to (untrusted user input). The gate function security.isRedirectAllowed is not visible in this file. The companion isUnintendedRedirect uses startsWith for URL matching, which is known to be bypassable. Without inspecting the actual gate, exploitability cannot be confirmed.
+
+EXAMPLE 2:
+Rule: hardcoded-jwt-secret
+File: lib/insecurity.ts (line 56)
+Code (excerpt): jwt.sign(user, privateKey, ...) where privateKey is defined at line 23 as a literal RSA private key string.
+Verdict: true_positive
+Confidence: 0.95
+Reasoning: The signing secret is hardcoded as a literal string in source. Anyone with repo access can extract the private key and forge JWT tokens for any user, achieving full authentication bypass. The companion publicKey is loaded from a file, which is appropriate for a public key but not for the private key.
+
+EXAMPLE 3:
+Rule: express-sequelize-injection
+File: routes/login.ts (line 34)
+Code (excerpt): sequelize.query(`SELECT * FROM Users WHERE email = '${{req.body.email}}' AND password = '${{security.hash(req.body.password)}}' ...`)
+Verdict: true_positive
+Confidence: 0.95
+Reasoning: User input from req.body is interpolated directly into a raw SQL string via template literal. There is no parameterization, no ORM query builder, no escape function. A payload like ' OR 1=1 -- in the email field bypasses authentication.
+END EXAMPLES
+
+"""
+
+
+# Derive the few_shot prompt from baseline by inserting the examples block
+# right after the classification instructions and before the finding data.
+_FEW_SHOT_PROMPT = _BASELINE_PROMPT.replace(
+    "Rule: {check_id}",
+    _FEW_SHOT_EXAMPLES_BLOCK + "Rule: {check_id}",
+)
+
+
 PROMPT_VARIANTS: dict[str, str] = {
     "baseline": _BASELINE_PROMPT,
     "no_path_bias": _NO_PATH_BIAS_PROMPT,
+    "few_shot": _FEW_SHOT_PROMPT,
 }
 
 
@@ -92,6 +142,12 @@ def triage_finding(finding: dict, variant: str = "baseline") -> TriageVerdict:
             * ``"no_path_bias"`` — baseline + an explicit instruction to
               ignore file paths, project names, and repository
               reputation when forming the verdict.
+            * ``"few_shot"`` — baseline + three worked examples drawn
+              from the human-labeled ground truth, one per verdict
+              label (``needs_review``, ``true_positive``,
+              ``true_positive``), demonstrating line-anchored reasoning
+              and proper escalation to ``needs_review`` when context is
+              insufficient.
 
     Returns:
         A validated :class:`TriageVerdict` with the model's classification.
