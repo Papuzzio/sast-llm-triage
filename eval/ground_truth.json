@@ -87,6 +87,17 @@
       "reasoning": "Line 19 calls res.redirect(toUrl) where toUrl originates from query.to (line 15) — untrusted user input from the query string. The redirect is gated by security.isRedirectAllowed(toUrl) on line 16, which is imported from lib/insecurity.ts and not visible in this file. The companion function isUnintendedRedirect (lines 27-32) uses utils.startsWith against security.redirectAllowlist, which suggests the actual gate may use the same pattern — startsWith for URL validation is known to be bypassable via subdomain tricks (e.g., https://allowed.com.attacker.com starts with the allowed prefix but redirects to the attacker). Without inspecting the actual gate function, I cannot confirm whether it has this weakness. Escalating to needs_review.",
       "labeler": "phillip",
       "labeled_at": "2026-04-27T00:44:21Z"
+    },
+    {
+      "finding_index": 5,
+      "check_id": "express-detect-notevil-usage",
+      "path_relative": "routes/b2bOrder.ts",
+      "line": 23,
+      "verdict": "true_positive",
+      "confidence": 0.75,
+      "reasoning": "Line 23 evaluates user-controlled orderLinesData (sourced from req.body on lines 17 and 19) as JavaScript inside a notevil + vm.runInContext sandbox. Despite the use of safer-eval libraries, neither notevil nor Node.js's vm module are documented security boundaries — both have known escape techniques. The 2-second timeout protects against DoS but not against arbitrary code execution within that window. The surrounding code explicitly references this as the target of rceChallenge and rceOccupyChallenge, indicating intentional vulnerability. True positive at moderate confidence — the defenses are real but bypassable.",
+      "labeler": "phillip",
+      "labeled_at": "2026-04-27T16:52:20Z"
     }
   ]
 }
