@@ -47,3 +47,6 @@ Thumbs.db
 # Data (scan outputs, large artifacts) — keep directory via .gitkeep
 data/*
 !data/.gitkeep
+
+# Eval harness results — large per-run artifacts; keep ground_truth.json tracked
+eval/results_*.json

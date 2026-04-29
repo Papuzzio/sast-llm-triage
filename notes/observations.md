@@ -276,3 +276,144 @@ toward X" claim, including ones we make confidently from looking at one
 or two reasoning traces, needs N≥5 trials and a comparison against the
 distribution under a control condition before we should treat it as a
 real property of the prompt.
+
+## Session 6
+
+First end-to-end run of the statistical eval harness against the labeled
+ground-truth set. The headline numbers told one story; the like-for-like
+correction told a different and more interesting one.
+
+### 1. First eval run: 9 labels × 3 variants × 5 trials = 130 attempted, 118 used
+
+Ran `scripts/run_eval.py` which executes
+:func:`~src.eval_harness.run_evaluation` against the full label set. Of
+135 nominal trials (9 × 3 × 5), 15 were skipped due to few-shot
+contamination (3 labels × 5 trials × 1 variant) and 2 errored — both
+transient Gemini ``503 UNAVAILABLE`` capacity errors on
+``finding_index=5`` (the b2bOrder notevil case) under ``no_path_bias``,
+trials 2 and 3. The per-trial try/except caught both, the run completed
+cleanly, and 118 trials produced usable verdicts. Full per-trial JSON is
+at ``eval/results_20260429-003519.json`` (gitignored;
+``eval/results_*.json`` was added to ``.gitignore`` before this run).
+
+The harness handled the failure mode gracefully, which is exactly what
+it was designed to do — but a small ``tenacity``-style retry layer on
+``ServerError``/503 would recover transient failures without writing
+``error`` rows. Worth adding before the next scale-up.
+
+### 2. Original headline: a clean ranking that turned out to be misleading
+
+Aggregated over all succeeded trials:
+
+| Variant        | n_succeeded | Match rate | Avg confidence | Avg latency |
+|----------------|-------------|------------|----------------|-------------|
+| `baseline`     | 45          | 44.4%      | 0.912          | 8.10s       |
+| `no_path_bias` | 43          | 51.2%      | 0.911          | 7.67s       |
+| `few_shot`     | 30          | 60.0%      | 0.820          | 8.39s       |
+
+The ranking ``few_shot > no_path_bias > baseline`` matches what any
+prompt-engineering practitioner would predict, and the gaps look real
+(7–9 points between adjacent variants).
+
+**But the variants were measured on different label subsets.**
+``few_shot`` evaluated 6 of 9 labels (3 contaminated by appearing as
+worked examples in its own prompt); ``baseline`` and ``no_path_bias``
+evaluated all 9. Apples to oranges.
+
+### 3. Like-for-like correction: the "few_shot wins" story collapses
+
+Recomputed match-rate over the 6 non-contaminated labels only
+(excluding ``finding_index`` ∈ ``{3, 13, 15}``):
+
+| Variant        | All-labels rate | Non-contaminated rate (n=30 each)¹ |
+|----------------|-----------------|------------------------------------|
+| `baseline`     | 44.4%           | **46.7%**                          |
+| `no_path_bias` | 51.2%           | **60.7%** (n=28²)                  |
+| `few_shot`     | 60.0%           | **60.0%**                          |
+
+¹ ``baseline`` and ``few_shot`` succeeded on all 30 non-contaminated
+trials; ``no_path_bias`` had 28 of 30 due to the 2 errored 503s above.
+
+² Both errored trials were on a non-contaminated label
+(``finding_index=5``), so they fall inside the like-for-like denominator.
+
+The corrected picture:
+
+- ``few_shot`` and ``no_path_bias`` are **statistically tied** at ~60%.
+- ``baseline`` lags both by ~14 points — that gap survived the
+  correction, so it is not a label-mix artifact. Either constraint
+  (worked examples *or* anti-bias instruction) appears to help; both
+  appear to help comparably.
+- The original 9-point ``few_shot`` advantage was an apples-to-oranges
+  artifact of the contamination-skip mechanism.
+
+**The interesting finding is the cost dimension.** ``no_path_bias`` adds
+one sentence to the baseline prompt (~30 tokens). ``few_shot`` adds
+three full worked examples (~600 tokens). They produce equivalent
+match-rate on this label set. Cost-effectiveness analysis decisively
+favors ``no_path_bias`` until/unless we see a label class where
+``few_shot``'s extra structure earns its keep.
+
+### 4. The confidence-vs-accuracy hypothesis got partial support
+
+The Session 5 §5.3 hypothesis was: *do constraint-heavy prompts produce
+more humble (lower-confidence) verdicts on uncertain cases, even when
+the verdict label is unchanged?*
+
+What the run actually showed:
+
+- ``few_shot``: confidence 0.820, match-rate 60.0% — **humbler and at
+  least as accurate**. Matches the hypothesis cleanly.
+- ``no_path_bias``: confidence 0.911 (essentially identical to
+  ``baseline``'s 0.912), match-rate 60.7% — **same confidence as
+  baseline, but more accurate**. Does not match the "more constraints →
+  lower confidence" story.
+
+So the hypothesis was directionally right for one variant and wrong for
+the other. Updated reading: **the type of constraint matters**.
+
+- Worked examples (few_shot) demonstrate a *style* of reasoning that
+  includes the move "I do not have enough context — escalate to
+  ``needs_review``". This propagates through the model as both
+  better-calibrated reasoning and lower confidence.
+- An explicit instruction (no_path_bias) prunes one specific
+  failure mode (path-name priors) without changing the model's
+  baseline confidence calibration. It tightens accuracy without
+  affecting how sure the model feels.
+
+If this generalizes, the prompt-engineering implication is that
+"humility-via-constraint" is not a free side effect of adding any
+constraint — it requires demonstrating humility in the prompt, not just
+forbidding a specific bias.
+
+### 5. Floor-effect caveat for the writeup
+
+Of the 9 ground-truth labels, 3 are ``needs_review``. A null model that
+returns ``needs_review`` on every input would score 3/9 = **33.3%**
+match-rate by default — meaning the bottom of our match-rate scale is
+not zero. All three variants clear this floor:
+
+- ``baseline``: 46.7% (+13.4 over floor)
+- ``no_path_bias``: 60.7% (+27.4 over floor)
+- ``few_shot``: 60.0% (+26.7 over floor)
+
+So the variants are doing real work — but the absolute match-rates are
+inflated by the share of ``needs_review`` cases in the label set, which
+are the easiest verdicts to land. Any reported number should also
+include the always-``needs_review`` baseline so readers can see how
+much of the headline rate is non-trivial.
+
+A more honest aggregate metric would either be (a) match-rate
+stratified by ground-truth verdict class, or (b) match-rate excluding
+the trivially-easy class. We can compute either from the existing
+trials JSON without re-running.
+
+### 6. Known gaps before any external claim
+
+| Gap | Why it matters | Cheapest fix |
+|---|---|---|
+| **No labeled FPs (0/9)** | Cannot measure specificity. A "always say true_positive" model would score well on TP recall and look great in the aggregate. | Label 3–5 likely-FP candidates from the unlabeled set (see §5.1 for candidate list). |
+| **N=5 trials per pair** | Cannot make statistical claims about variant differences. The ~14-point ``baseline`` gap *looks* real, but we have no significance test. | Run N=10 or N=20 on the most interesting (variant, label) pairs. Cost: linear in N. |
+| **Single model (Gemini 2.5-flash only)** | Cannot distinguish "this prompt change helps" from "this prompt change helps Gemini specifically". | Wire up Claude Haiku (or any second model with structured output). The pipeline is model-agnostic above the SDK boundary. |
+| **No retry layer on transient errors** | Two 503s cost us 2 of 45 trials in this run. At larger N, retries matter. | Wrap the API call in a tenacity exponential-backoff retry on ``ServerError``/503. |
+| **Few-shot examples are 2 TP + 1 needs_review** | The few_shot prompt demonstrates only two of three verdict labels. May implicitly bias toward those classes. | Once a labeled FP exists, swap one TP example for it. |
