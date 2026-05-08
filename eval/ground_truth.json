@@ -98,6 +98,50 @@
       "reasoning": "Line 23 evaluates user-controlled orderLinesData (sourced from req.body on lines 17 and 19) as JavaScript inside a notevil + vm.runInContext sandbox. Despite the use of safer-eval libraries, neither notevil nor Node.js's vm module are documented security boundaries — both have known escape techniques. The 2-second timeout protects against DoS but not against arbitrary code execution within that window. The surrounding code explicitly references this as the target of rceChallenge and rceOccupyChallenge, indicating intentional vulnerability. True positive at moderate confidence — the defenses are real but bypassable.",
       "labeler": "phillip",
       "labeled_at": "2026-04-27T16:52:20Z"
+    },
+    {
+      "finding_index": 22,
+      "check_id": "express-check-directory-listing",
+      "path_relative": "server.ts",
+      "line": 269,
+      "verdict": "true_positive",
+      "confidence": 0.9,
+      "reasoning": "Line 269 registers serveIndex('ftp', ...) as middleware on the /ftp route, exposing a browsable directory listing of the ftp/ folder to anyone visiting that URL. Unlike finding #25 which has misordered auth on the same pattern, this route has no auth middleware before or after the directory listing — nothing on lines 260-268 protects /ftp, and no subsequent app.use on /ftp adds an auth check. The Juice Shop comments (vuln-code-snippet vuln-line directoryListingChallenge) confirm this is the deliberately-vulnerable target of the directory-listing challenge.",
+      "labeler": "phillip",
+      "labeled_at": "2026-05-08T20:31:10Z"
+    },
+    {
+      "finding_index": 6,
+      "check_id": "eval-detected",
+      "path_relative": "routes/captcha.ts",
+      "line": 22,
+      "verdict": "false_positive",
+      "confidence": 0.9,
+      "reasoning": "Line 22 calls eval(expression). Tracing expression to its construction on line 21, it is built by concatenating three random integers (firstTerm, secondTerm, thirdTerm from Math.random() on lines 14-16) with two operators picked from a hardcoded list ['*', '+', '-'] (lines 18-19). No user input reaches expression — every component is server-generated. The Semgrep rule fires on the literal use of eval() but the rule's precondition (attacker-controlled input reaching eval) does not hold. Worst case, eval runs trivial arithmetic. False positive.",
+      "labeler": "phillip",
+      "labeled_at": "2026-05-08T20:53:51Z"
+    },
+    {
+      "finding_index": 10,
+      "check_id": "express-libxml-vm-noent",
+      "path_relative": "routes/fileUpload.ts",
+      "line": 83,
+      "verdict": "true_positive",
+      "confidence": 0.9,
+      "reasoning": "Line 83 calls libxml.parseXml(data, { noblanks: true, noent: true, nocdata: true }) where data is sourced from file.buffer.toString() on line 79 — the user-uploaded XML file. The noent: true option enables XML entity substitution, which is the classic XXE attack vector: an attacker submits XML referencing external entities like <!ENTITY xxe SYSTEM 'file:///etc/passwd'> to exfiltrate server-side files or trigger SSRF. The vm.runInContext sandbox with a 2-second timeout protects against XXE-DoS (billion-laughs amplification) but provides no defense against file disclosure, which happens instantly. The surrounding code explicitly checks the parsed output for /etc/passwd and system.ini contents (line 85), confirming Juice Shop has named this as the deliberately-vulnerable target of the xxeFileDisclosureChallenge.",
+      "labeler": "phillip",
+      "labeled_at": "2026-05-08T21:10:46Z"
+    },
+    {
+      "finding_index": 21,
+      "check_id": "unsafe-formatstring",
+      "path_relative": "server.ts",
+      "line": 155,
+      "verdict": "false_positive",
+      "confidence": 0.85,
+      "reasoning": "Line 155 calls console.error with three arguments: a hardcoded literal string ('Error in timed startup function: '), the function parameter `name`, and the caught error object. Tracing `name` to its callers on lines 164-166, every invocation passes a hardcoded string ('validatePreconditions', 'cleanupFtpFolder', 'validateConfig'). No user input reaches this function — it's a startup-only utility for timing internal initialization functions. The rule fires on a pattern (string concatenation passed to a logging function) but the precondition (attacker-controlled input flowing into a format string) does not hold. The INFO severity reflects Semgrep's own low confidence in this finding type.",
+      "labeler": "phillip",
+      "labeled_at": "2026-05-08T21:15:53Z"
     }
   ]
 }
