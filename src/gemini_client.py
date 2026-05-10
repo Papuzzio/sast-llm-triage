@@ -17,8 +17,11 @@ from google import genai
 from google.genai.types import GenerateContentConfig
 from pydantic import BaseModel
 
-# Load .env once at import time so callers don't need to remember.
-load_dotenv()
+# Load .env once at import time so callers don't need to remember. Use
+# override=True so .env wins over stale shell vars (matches the
+# behavior of src.claude_client; see that module's load_dotenv comment
+# for the failure mode this prevents).
+load_dotenv(override=True)
 
 _MODEL = "gemini-2.5-flash"
 

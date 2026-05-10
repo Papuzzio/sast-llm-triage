@@ -1,4 +1,4 @@
-"""Run the evaluation harness against the labeled findings + 3 prompt variants.
+"""Run the evaluation harness across prompt variants × model providers.
 
 Loads:
 - ``data/semgrep_juiceshop.json`` (the 26 Semgrep findings)
@@ -6,11 +6,13 @@ Loads:
   :class:`~src.label_schema.GroundTruthLabel`)
 
 Calls :func:`~src.eval_harness.run_evaluation` with all three prompt
-variants and N=5 trials per (label, variant) pair, then:
+variants × both model providers (Gemini and Claude) and N=5 trials per
+(label, variant, model) cell, then:
 
 - Writes the full per-trial results + summary to
   ``eval/results_<UTC YYYYMMDD-HHMMSS>.json``.
-- Prints a plain-text summary table to stdout.
+- Prints a plain-text summary table to stdout, one row per
+  ``variant__model`` cell.
 """
 
 from __future__ import annotations
@@ -32,6 +34,7 @@ LABELS_PATH = PROJECT_ROOT / "eval" / "ground_truth.json"
 RESULTS_DIR = PROJECT_ROOT / "eval"
 
 VARIANTS = ["baseline", "no_path_bias", "few_shot"]
+MODELS = ["gemini", "claude"]
 N_TRIALS = 5
 
 
@@ -48,7 +51,7 @@ def _load_labels() -> list[GroundTruthLabel]:
 
 def _print_summary_table(summary: dict) -> None:
     headers = [
-        "variant",
+        "variant__model",
         "n_succeeded",
         "n_errored",
         "match_rate",
@@ -57,10 +60,10 @@ def _print_summary_table(summary: dict) -> None:
         "skipped_contaminated",
     ]
     rows: list[list[str]] = []
-    for variant, stats in summary.items():
+    for cell_key, stats in summary.items():
         rows.append(
             [
-                variant,
+                cell_key,
                 str(stats["n_trials_succeeded"]),
                 str(stats["n_trials_errored"]),
                 f"{stats['match_rate'] * 100:.1f}%",
@@ -91,13 +94,15 @@ def main() -> None:
     print(f"Findings: {len(findings)} total")
     print(f"Labels:   {len(labels)} (will evaluate)")
     print(f"Variants: {VARIANTS}")
-    print(f"N trials per (label, variant): {N_TRIALS}")
+    print(f"Models:   {MODELS}")
+    print(f"N trials per (label, variant, model): {N_TRIALS}")
     print()
 
     result = run_evaluation(
         findings=findings,
         labels=labels,
         variants=VARIANTS,
+        models=MODELS,
         n_trials=N_TRIALS,
     )
 

@@ -1,18 +1,25 @@
-"""Triage a single Semgrep finding by asking Gemini for a structured verdict.
+"""Triage a single Semgrep finding by asking an LLM for a structured verdict.
 
 Given a raw finding dict (as produced by ``semgrep --json``), this module
 pulls the relevant fields, reads the surrounding source-code snippet from
-disk, assembles an AppSec-engineer-style prompt, and asks Gemini for a
-:class:`~src.triage_schema.TriageVerdict` in structured JSON. Pydantic
-validates the response before it's returned.
+disk, assembles an AppSec-engineer-style prompt, and asks the selected
+model (Gemini or Claude) for a :class:`~src.triage_schema.TriageVerdict`
+in structured form. Pydantic validates the response before it's returned.
 
-Multiple prompt variants live in :data:`PROMPT_VARIANTS` so we can A/B
-test prompt-engineering changes (e.g. whether an explicit instruction to
-ignore file paths suppresses the "this is juice-shop so it must be
-exploitable" bias we observed in Session 3, or whether seeding the prompt
-with worked examples drawn from the human-labeled ground truth nudges
-the model toward more grounded, line-referenced reasoning). Callers pick
-a variant by name via the ``variant`` argument to :func:`triage_finding`.
+Two orthogonal axes of comparison are exposed:
+
+* **Prompt variants** live in :data:`PROMPT_VARIANTS` so we can A/B test
+  prompt-engineering changes (e.g. whether an explicit instruction to
+  ignore file paths suppresses the "this is juice-shop so it must be
+  exploitable" bias we observed in Session 3, or whether seeding the
+  prompt with worked examples drawn from the human-labeled ground truth
+  nudges the model toward more grounded, line-referenced reasoning).
+* **Model providers** live in :data:`MODEL_DISPATCH` so we can compare
+  the same prompt across model families (Gemini vs. Claude) and tell
+  prompt-induced behavior apart from model-induced behavior.
+
+Callers pick both via the ``variant`` and ``model`` arguments to
+:func:`triage_finding`.
 
 This is the per-finding unit of work; the orchestrator (not yet written)
 will loop over all findings and persist verdicts to disk.
@@ -20,6 +27,9 @@ will loop over all findings and persist verdicts to disk.
 
 from __future__ import annotations
 
+from typing import Callable
+
+from .claude_client import call_claude_structured
 from .gemini_client import call_gemini_structured
 from .snippet_reader import read_snippet
 from .triage_schema import TriageVerdict
@@ -123,13 +133,27 @@ PROMPT_VARIANTS: dict[str, str] = {
 }
 
 
-def triage_finding(finding: dict, variant: str = "baseline") -> TriageVerdict:
-    """Classify a single Semgrep finding via Gemini structured output.
+# Map model name to the per-provider structured-call function. Both
+# entries share the same ``(prompt, schema) -> BaseModel`` signature, so
+# :func:`triage_finding` can dispatch on the ``model`` argument without
+# branching on the provider's SDK quirks.
+MODEL_DISPATCH: dict[str, Callable] = {
+    "gemini": call_gemini_structured,
+    "claude": call_claude_structured,
+}
+
+
+def triage_finding(
+    finding: dict,
+    variant: str = "baseline",
+    model: str = "gemini",
+) -> TriageVerdict:
+    """Classify a single Semgrep finding via an LLM's structured output.
 
     Extracts the file path, line range, rule id, CWE, severity, and rule
     description from ``finding``; reads a ``context=3`` snippet around the
-    flagged range; formats the selected prompt template; and asks Gemini
-    for a :class:`TriageVerdict`.
+    flagged range; formats the selected prompt template; and asks the
+    selected model for a :class:`TriageVerdict`.
 
     Args:
         finding: One element of the ``results`` array in Semgrep's JSON
@@ -148,16 +172,25 @@ def triage_finding(finding: dict, variant: str = "baseline") -> TriageVerdict:
               ``true_positive``), demonstrating line-anchored reasoning
               and proper escalation to ``needs_review`` when context is
               insufficient.
+        model: Which model provider in :data:`MODEL_DISPATCH` to call.
+            Defaults to ``"gemini"``. Available models:
+
+            * ``"gemini"`` — Gemini 2.5 Flash via the ``google-genai``
+              SDK; structured output via ``response_schema``.
+            * ``"claude"`` — Claude Haiku 4.5 via the ``anthropic``
+              SDK; structured output via a forced single-tool call.
 
     Returns:
         A validated :class:`TriageVerdict` with the model's classification.
 
     Raises:
         KeyError: If ``variant`` is not a key in :data:`PROMPT_VARIANTS`,
-            or if ``finding`` is missing a required field.
+            if ``model`` is not a key in :data:`MODEL_DISPATCH`, or if
+            ``finding`` is missing a required field.
         FileNotFoundError: If the file at ``finding['path']`` cannot be read.
-        pydantic.ValidationError: If Gemini returns JSON that does not
-            conform to the :class:`TriageVerdict` schema.
+        pydantic.ValidationError: If the model returns a structured
+            response that does not conform to the :class:`TriageVerdict`
+            schema.
     """
     try:
         template = PROMPT_VARIANTS[variant]
@@ -165,6 +198,14 @@ def triage_finding(finding: dict, variant: str = "baseline") -> TriageVerdict:
         raise KeyError(
             f"Unknown prompt variant: {variant!r}. "
             f"Available variants: {sorted(PROMPT_VARIANTS)}"
+        ) from None
+
+    try:
+        call_structured = MODEL_DISPATCH[model]
+    except KeyError:
+        raise KeyError(
+            f"Unknown model: {model!r}. "
+            f"Available models: {sorted(MODEL_DISPATCH)}"
         ) from None
 
     path = finding["path"]
@@ -188,7 +229,7 @@ def triage_finding(finding: dict, variant: str = "baseline") -> TriageVerdict:
         snippet=snippet,
     )
 
-    verdict = call_gemini_structured(prompt, TriageVerdict)
-    # call_gemini_structured returns BaseModel; narrow to TriageVerdict.
+    verdict = call_structured(prompt, TriageVerdict)
+    # The dispatched function returns BaseModel; narrow to TriageVerdict.
     assert isinstance(verdict, TriageVerdict)
     return verdict
