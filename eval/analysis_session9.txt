@@ -1,0 +1,53 @@
+variant__model          headline_rate   headline_n   l4l_rate    l4l_n
+----------------------  --------------  -----------  ----------  ------
+baseline__gemini          56.9%        65             60.0%    50
+baseline__claude          63.1%        65             72.0%    50
+no_path_bias__gemini      56.9%        65             64.0%    50
+no_path_bias__claude      59.4%        64             68.0%    50
+few_shot__gemini          68.0%        50             68.0%    50
+few_shot__claude          78.0%        50             78.0%    50
+
+
+variant         model     gt_class          n_trials   match_rate
+--------------  --------  ----------------  ---------  ----------
+baseline        gemini    true_positive     40           70.0%
+baseline        gemini    false_positive    10           70.0%
+baseline        gemini    needs_review      15           13.3%
+--------------  --------  ----------------  ---------  ----------
+baseline        claude    true_positive     40           60.0%
+baseline        claude    false_positive    10          100.0%
+baseline        claude    needs_review      15           46.7%
+--------------  --------  ----------------  ---------  ----------
+no_path_bias    gemini    true_positive     40           72.5%
+no_path_bias    gemini    false_positive    10           40.0%
+no_path_bias    gemini    needs_review      15           26.7%
+--------------  --------  ----------------  ---------  ----------
+no_path_bias    claude    true_positive     39           59.0%
+no_path_bias    claude    false_positive    10          100.0%
+no_path_bias    claude    needs_review      15           33.3%
+--------------  --------  ----------------  ---------  ----------
+few_shot        gemini    true_positive     30           63.3%
+few_shot        gemini    false_positive    10          100.0%
+few_shot        gemini    needs_review      10           50.0%
+--------------  --------  ----------------  ---------  ----------
+few_shot        claude    true_positive     30           66.7%
+few_shot        claude    false_positive    10          100.0%
+few_shot        claude    needs_review      10           90.0%
+--------------  --------  ----------------  ---------  ----------
+
+
+{
+  "finding_index": 13,
+  "check_id": "express-sequelize-injection",
+  "variant": "no_path_bias",
+  "model": "claude",
+  "trial_number": 5,
+  "ground_truth": {
+    "verdict": "true_positive",
+    "confidence": 0.95
+  },
+  "model_output": null,
+  "match": null,
+  "latency_seconds": 4.707822499971371,
+  "error": "ValidationError: 1 validation error for TriageVerdict\ncwe_confirmed\n  Input should be a valid boolean, unable to interpret input [type=bool_parsing, input_value='true</cwe_confirmed>\\n</invoke>', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/bool_parsing"
+}

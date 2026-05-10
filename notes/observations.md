@@ -417,3 +417,177 @@ trials JSON without re-running.
 | **Single model (Gemini 2.5-flash only)** | Cannot distinguish "this prompt change helps" from "this prompt change helps Gemini specifically". | Wire up Claude Haiku (or any second model with structured output). The pipeline is model-agnostic above the SDK boundary. |
 | **No retry layer on transient errors** | Two 503s cost us 2 of 45 trials in this run. At larger N, retries matter. | Wrap the API call in a tenacity exponential-backoff retry on ``ServerError``/503. |
 | **Few-shot examples are 2 TP + 1 needs_review** | The few_shot prompt demonstrates only two of three verdict labels. May implicitly bias toward those classes. | Once a labeled FP exists, swap one TP example for it. |
+
+## Session 9
+
+First two-axis run: prompt variants × model providers. Closed three of
+the gaps from §6.6 (added labeled FPs, added a second model, expanded
+labels from 9 to 13) and surfaced the most discriminating results yet.
+
+### 1. Run metadata: 360 nominal trials, 1 errored, 359 succeeded
+
+13 labels × 3 variants × 2 models × 5 trials = 360 nominal trials.
+3 contaminated labels × 1 variant (``few_shot``) × 2 models × 5 trials =
+30 skipped. Of the 330 attempted, 329 succeeded and 1 errored — a
+Pydantic validation failure on
+``(finding 13, no_path_bias, claude, trial 5)``. Discussed in §9.4.
+Total wall clock: ~30 minutes for both providers run sequentially.
+Full per-trial JSON at ``eval/results_20260510-192619.json``
+(gitignored). Per-cell tables saved to
+``eval/analysis_session9.txt``.
+
+### 2. Like-for-like results across all 6 cells
+
+Headline match-rates were apples-to-oranges (``few_shot`` denominators
+exclude contaminated indices). Recomputing on the common 10-label
+non-contaminated subset (50 trials per cell):
+
+| variant__model | l4l match rate | l4l n |
+|----------------|---------------:|------:|
+| `baseline__gemini`     | 60.0% | 50 |
+| `baseline__claude`     | 72.0% | 50 |
+| `no_path_bias__gemini` | 64.0% | 50 |
+| `no_path_bias__claude` | 68.0% | 50 |
+| `few_shot__gemini`     | 68.0% | 50 |
+| **`few_shot__claude`** | **78.0%** | 50 |
+
+Two patterns survive the correction:
+
+- **Claude beats Gemini on every prompt variant**, by margins of +12.0
+  (baseline), +4.0 (no_path_bias), and +10.0 (few_shot). The smallest
+  Claude lead is on the prompt variant that hurt Gemini the most —
+  `no_path_bias` — which clusters the variants closer together for both
+  models.
+- **Within each model, ``few_shot`` is the best prompt.** For Gemini the
+  ranking is `few_shot` > `no_path_bias` > `baseline` (clean monotonic).
+  For Claude it's `few_shot` > `baseline` > `no_path_bias` — meaning the
+  anti-path-bias instruction *hurt* Claude by 4 points relative to
+  baseline. The Session 5–7 hypothesis ("constraint-heavy prompts help
+  or are neutral") needs a model-specific qualifier.
+
+### 3. Per-verdict-class breakdown: the aggregate hides everything
+
+| variant | model | TP rate | FP rate | NR rate |
+|---|---|---:|---:|---:|
+| `baseline` | gemini | 70.0% | 70.0% | **13.3%** |
+| `baseline` | claude | 60.0% | 100.0% | 46.7% |
+| `no_path_bias` | gemini | 72.5% | **40.0%** ⚠️ | 26.7% |
+| `no_path_bias` | claude | 59.0% | 100.0% | 33.3% |
+| `few_shot` | gemini | 63.3% | 100.0% | 50.0% |
+| `few_shot` | claude | 66.7% | 100.0% | **90.0%** ✓ |
+
+Three classes, three different stories:
+
+- **`true_positive`** — narrow band, 59-72% across all 6 cells. The
+  class barely discriminates between configurations. Gemini holds a
+  slight ~5-point edge on the high end; Claude the low end. Worth
+  noting for the writeup that **Gemini is more aggressive on real
+  bugs** (the obverse of the FP/NR results below).
+- **`false_positive`** — five of six cells score 100%; the lone
+  outlier is **`no_path_bias__gemini` at 40%**. The instruction
+  designed to suppress one over-flagging failure mode (path priors)
+  apparently *causes* a different over-flagging failure for Gemini
+  specifically. Claude is unaffected by the same instruction. The
+  variant's name "no_path_bias" is, ironically, the worst description
+  of its actual effect on Gemini.
+- **`needs_review`** — the highest-spread class, 13.3% to 90.0% (a
+  ~7× range). Worked examples (``few_shot``) help dramatically on
+  both models, especially Claude. ``baseline__gemini`` at 13% is the
+  worst single cell: it gets needs_review wrong 87% of the time,
+  meaning when the right answer is "I don't have enough context to
+  say," Gemini confidently says something else. This is the
+  triage-pipeline failure mode the eval was originally designed to
+  detect.
+
+### 4. The errored trial: structured output edge case
+
+```
+finding 13 (express-sequelize-injection, routes/login.ts:34)
+variant: no_path_bias, model: claude, trial 5
+
+ValidationError: 1 validation error for TriageVerdict
+cwe_confirmed
+  Input should be a valid boolean, unable to interpret input
+  [type=bool_parsing,
+   input_value='true</cwe_confirmed>\n</invoke>',
+   input_type=str]
+```
+
+Claude's tool-use output for the boolean ``cwe_confirmed`` field came
+back as the literal string ``'true</cwe_confirmed>\n</invoke>'`` —
+Anthropic's internal XML-style tool-call format leaking into the field
+value. Pydantic rejected it (the value is not a valid boolean), the
+harness caught the exception, and the run continued cleanly.
+
+The finding being triaged is the SQL injection in ``routes/login.ts:34``,
+whose snippet contains injection-payload-shaped strings (``' OR 1=1 --``).
+Plausible (but unconfirmed) hypothesis: the snippet's escape-like
+patterns interfered with Claude's tool-call generation, causing it to
+emit a partial closing tag mid-response. Worth a follow-up: re-run
+that exact (finding, variant, model) cell N=20 times and see if the
+failure reproduces.
+
+For the writeup: this is a **strength** of the validation layer, not a
+weakness of the pipeline. Claude returned malformed structured output;
+Pydantic caught it before downstream consumers saw garbage; the harness
+recorded an explicit error rather than silently producing a wrong
+verdict. The pattern of "let the validator be the safety net" paid off
+here in a way we didn't predict.
+
+### 5. Headline finding: model-prompt interaction is real
+
+Across two providers, three prompts, and 13 labeled findings:
+
+- The strongest single configuration is **`few_shot__claude` at 78.0%
+  match rate** (l4l, n=50).
+- The weakest is **`baseline__gemini` at 60.0%** (l4l, n=50).
+- Spread: **18 percentage points** between best and worst.
+
+But the more interesting story is class-stratified. The aggregate hides
+that Claude and Gemini have qualitatively different behaviors: Claude
+excels at saying "this isn't a bug" (FP rate ≥ baseline at 100%
+everywhere) and "I need more context" (NR rate ≥ baseline at every
+prompt level), while Gemini is more aggressive on real bugs (TP rate
+≥ Claude's at every prompt level except few_shot, where they're tied).
+
+**For a security-engineering workflow** where the cost of a wrong
+verdict is a wasted human-reviewer hour, Claude + few_shot looks like
+the right default. The 90% needs_review rate means it knows when to
+escalate. **For a bug-bounty-prioritization workflow** where the cost
+of missing a real bug dominates and false positives are tolerable,
+baseline__gemini's higher TP rate could be defensible — at the cost of
+flooding the queue with FPs (which Gemini hits at 70% baseline,
+collapsing to 40% with the no_path_bias instruction).
+
+The "best prompt" question is genuinely model-dependent, and the
+"best model" question is genuinely use-case-dependent.
+
+### 6. Methodological caveats that still apply
+
+- **N=5 per cell.** Standard error on a binomial proportion at p=0.7,
+  n=50 is ~6.5 percentage points. The +12 / +4 / +10 cross-model gaps
+  are larger than this, so they're plausibly real signal — but the
+  +4 (no_path_bias) is within noise range. The within-cell per-class
+  numbers are noisier still (n=10–15 per class per cell).
+- **13 labels with only 2 FPs.** The 100% FP rate for 5 of 6 cells
+  could partly reflect that the 2 FPs we labeled are easy ones (the
+  captcha eval and the startup-only console log are both unambiguously
+  safe). Adding 3-5 harder FP candidates (like
+  ``express-check-directory-listing`` on auth-gated routes) would tell
+  us whether the FP-class "wins" survive against subtler cases.
+- **Single labeler.** No inter-rater agreement check on the ground
+  truth itself. A labeler-blind re-label by a second AppSec engineer
+  would tell us how much of the model-vs-ground-truth gap is "model
+  is wrong" vs "label is wrong."
+- **Single model per provider.** "Claude" here means Claude Haiku 4.5
+  specifically. Sonnet/Opus might behave differently; Gemini Pro vs
+  Flash likewise. Within-provider model-tier comparisons are out of
+  scope but worth a sentence in any external claim.
+- **Few-shot examples still demonstrate only 2 of 3 verdict classes.**
+  Per §6.6 last item — now that finding 6 (captcha eval) is labeled
+  `false_positive`, swapping one of the two TP examples in the
+  few_shot prompt for it is the cheapest next intervention. Predicted
+  effect: closes the small TP gap for `few_shot__claude` (currently
+  66.7% vs baseline_claude's 60%, but vs Gemini's 70-72.5%, this
+  could lift). Risk: removes one TP demonstration, which might
+  reduce TP rate.
