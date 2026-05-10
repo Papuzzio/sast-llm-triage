@@ -3,3 +3,4 @@ google-genai==1.73.1
 python-dotenv==1.2.2
 pydantic==2.13.2
 semgrep==1.160.0
+streamlit==1.57.0
