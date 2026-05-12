@@ -47,6 +47,7 @@ Thumbs.db
 # Data (scan outputs, large artifacts) — keep directory via .gitkeep
 data/*
 !data/.gitkeep
+!data/semgrep_juiceshop.json
 
 # Eval harness results — large per-run artifacts; keep ground_truth.json tracked
 eval/results_*.json
