@@ -48,6 +48,8 @@ Thumbs.db
 data/*
 !data/.gitkeep
 !data/semgrep_juiceshop.json
+!data/juice-shop-src/
+!data/juice-shop-src/**
 
 # Eval harness results — large per-run artifacts; keep ground_truth.json tracked
 eval/results_*.json

@@ -10,17 +10,19 @@ Exposes two entry points:
 
 from __future__ import annotations
 
-import os
-
 from dotenv import load_dotenv
 from google import genai
 from google.genai.types import GenerateContentConfig
 from pydantic import BaseModel
 
+from .api_keys import resolve_api_key
+
 # Load .env once at import time so callers don't need to remember. Use
 # override=True so .env wins over stale shell vars (matches the
 # behavior of src.claude_client; see that module's load_dotenv comment
-# for the failure mode this prevents).
+# for the failure mode this prevents). On Streamlit Cloud there is no
+# .env file; load_dotenv is a no-op there and resolve_api_key falls
+# back to st.secrets.
 load_dotenv(override=True)
 
 _MODEL = "gemini-2.5-flash"
@@ -28,11 +30,13 @@ _MODEL = "gemini-2.5-flash"
 
 def _get_client() -> genai.Client:
     """Build a Gemini client, raising a clear error if the API key is missing."""
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key or api_key == "your_key_here":
+    api_key = resolve_api_key("GEMINI_API_KEY")
+    if not api_key:
         raise RuntimeError(
-            "GEMINI_API_KEY is not set. Copy .env.example to .env and paste "
-            "your real key, or export GEMINI_API_KEY in your shell."
+            "GEMINI_API_KEY is not set. For local dev, copy .env.example to "
+            ".env and paste your key. For Streamlit Community Cloud, set it "
+            "in the app's Secrets section. Or export GEMINI_API_KEY in your "
+            "shell."
         )
     return genai.Client(api_key=api_key)
 

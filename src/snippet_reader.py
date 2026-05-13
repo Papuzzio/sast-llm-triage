@@ -8,6 +8,12 @@ above and below, and prefixes each line with its 1-indexed line number.
 
 The output is intended to be passed verbatim into an LLM triage prompt so
 the model can reason about the finding with the surrounding code visible.
+
+Path handling: absolute paths are read as-is (matches Semgrep's default
+output on local scans). Relative paths are resolved against the project
+root (parent of this module's ``src/`` directory), which lets bundled
+scan output reference files like ``data/juice-shop-src/routes/login.ts``
+and stay portable across machines and deployments.
 """
 
 from __future__ import annotations
@@ -16,6 +22,11 @@ from pathlib import Path
 from typing import Union
 
 PathLike = Union[str, Path]
+
+# Project root = parent of the directory containing this file (src/).
+# Used to resolve relative paths in scan output so bundled scans don't
+# depend on the absolute paths of the machine that ran Semgrep.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 def read_snippet(
@@ -34,6 +45,8 @@ def read_snippet(
 
     Args:
         path: Filesystem path to the source file (``str`` or ``Path``).
+            Absolute paths are read as-is. Relative paths are resolved
+            against the project root (parent of ``src/``).
         start_line: 1-indexed first line of the finding's range.
         end_line: 1-indexed last line of the finding's range (inclusive).
         context: Extra lines to include above and below the range.
@@ -49,6 +62,8 @@ def read_snippet(
             if ``context`` is negative.
     """
     file_path = Path(path)
+    if not file_path.is_absolute():
+        file_path = _PROJECT_ROOT / file_path
     if not file_path.is_file():
         raise FileNotFoundError(
             f"Cannot read snippet: no file at {file_path!s}"

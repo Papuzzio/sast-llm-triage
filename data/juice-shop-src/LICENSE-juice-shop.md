@@ -1,0 +1,1 @@
+The TypeScript source files in this directory are copied from the OWASP Juice Shop project (https://github.com/juice-shop/juice-shop), licensed under the MIT License. They are included here strictly to make data/semgrep_juiceshop.json self-contained for evaluation. Original copyright (c) Bjoern Kimminich & the OWASP Juice Shop contributors.

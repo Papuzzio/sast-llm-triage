@@ -16,16 +16,18 @@ function shapes, same error semantics on a missing API key.
 
 from __future__ import annotations
 
-import os
-
 from anthropic import Anthropic
 from dotenv import load_dotenv
 from pydantic import BaseModel
 
+from .api_keys import resolve_api_key
+
 # Load .env once at import time so callers don't need to remember. Use
 # override=True so .env wins over stale shell vars (e.g. an empty
 # ANTHROPIC_API_KEY exported by Claude for Desktop, which would
-# otherwise silently shadow the real key in .env).
+# otherwise silently shadow the real key in .env). On Streamlit Cloud
+# there is no .env file; load_dotenv is a no-op there and
+# resolve_api_key falls back to st.secrets.
 load_dotenv(override=True)
 
 _MODEL = "claude-haiku-4-5"
@@ -38,11 +40,13 @@ _STRUCTURED_TOOL_NAME = "submit_verdict"
 
 def _get_client() -> Anthropic:
     """Build an Anthropic client, raising a clear error if the API key is missing."""
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key or api_key == "your_key_here":
+    api_key = resolve_api_key("ANTHROPIC_API_KEY")
+    if not api_key:
         raise RuntimeError(
-            "ANTHROPIC_API_KEY is not set. Copy .env.example to .env and "
-            "paste your real key, or export ANTHROPIC_API_KEY in your shell."
+            "ANTHROPIC_API_KEY is not set. For local dev, copy .env.example "
+            "to .env and paste your key. For Streamlit Community Cloud, set "
+            "it in the app's Secrets section. Or export ANTHROPIC_API_KEY in "
+            "your shell."
         )
     return Anthropic(api_key=api_key)
 
