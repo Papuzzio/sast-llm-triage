@@ -53,3 +53,10 @@ data/*
 
 # Eval harness results — large per-run artifacts; keep ground_truth.json tracked
 eval/results_*.json
+
+# Terraform
+infra/terraform/.terraform/
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.*
+infra/terraform/terraform.tfvars
+infra/terraform/*.tfplan

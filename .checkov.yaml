@@ -1,0 +1,3 @@
+# Findings that are accepted are skipped inline, next to the resource, with a reason.
+compact: true
+quiet: true

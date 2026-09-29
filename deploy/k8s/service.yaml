@@ -1,0 +1,15 @@
+# ClusterIP only: the app is NOT exposed to the internet. Every run spends your LLM API
+# credits, so reach it with `kubectl port-forward` (see docs/DEPLOY_AWS.md).
+apiVersion: v1
+kind: Service
+metadata:
+  name: triagegpt
+  namespace: triagegpt
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: triagegpt
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
