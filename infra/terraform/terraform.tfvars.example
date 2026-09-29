@@ -1,0 +1,4 @@
+# Copy to terraform.tfvars (gitignored) and fill in.
+region      = "us-east-1"
+admin_cidrs = ["203.0.113.10/32"] # your public IP: curl -s https://checkip.amazonaws.com
+# create_github_oidc_provider = false  # if your account already has GitHub's OIDC provider

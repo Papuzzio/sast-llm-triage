@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: triagegpt
+  namespace: triagegpt
+  labels:
+    app.kubernetes.io/name: triagegpt
+  annotations:
+    checkov.io/skip1: CKV_K8S_14=image is a placeholder replaced with an immutable ECR digest at deploy time
+    checkov.io/skip2: CKV_K8S_43=image is a placeholder replaced with an immutable ECR digest at deploy time
+    checkov.io/skip3: CKV_K8S_35=the app reads keys from env vars; the Secret is KMS-envelope-encrypted and synced from Secrets Manager
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: triagegpt
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: triagegpt
+    spec:
+      serviceAccountName: triagegpt
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          image: IMAGE_PLACEHOLDER # replaced at deploy time with <ecr-url>@sha256:<digest>
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8501
+          envFrom:
+            - secretRef:
+                name: triagegpt-api-keys
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            privileged: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /_stcore/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /_stcore/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
