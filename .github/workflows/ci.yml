@@ -45,6 +45,15 @@ jobs:
           pipx run pip-audit -r requirements-app.txt --strict
       - name: Build
         run: docker build -t triagegpt:ci .
+      - name: Smoke test (container starts and serves health check)
+        run: |
+          docker run -d --name smoke --read-only --tmpfs /tmp -p 8501:8501 triagegpt:ci
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8501/_stcore/health && exit 0
+            sleep 2
+          done
+          docker logs smoke
+          exit 1
       - name: Trivy image scan (fail on fixable HIGH/CRITICAL)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:

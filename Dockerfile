@@ -12,7 +12,8 @@ ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 RUN python -m venv /opt/venv
 ENV PATH=/opt/venv/bin:$PATH
 COPY requirements-app.txt .
-RUN pip install --require-virtualenv -r requirements-app.txt
+RUN pip install --require-virtualenv -r requirements-app.txt \
+ && python -m pip uninstall -y pip setuptools wheel
 
 # checkov:skip=CKV_DOCKER_7:base is pinned through the PYTHON_IMAGE build arg (python:3.12-slim-bookworm)
 FROM ${PYTHON_IMAGE}
@@ -22,7 +23,13 @@ ENV PATH=/opt/venv/bin:$PATH \
     HOME=/tmp \
     STREAMLIT_BROWSER_GATHER_USAGE_STATS=false \
     STREAMLIT_SERVER_HEADLESS=true
-RUN groupadd --system --gid 10001 app \
+# Patch OS packages the base image hasn't picked up yet, and remove the bundled
+# pip/setuptools: the runtime image has no package installer.
+RUN apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
+ && rm -rf /var/lib/apt/lists/* \
+ && python -m pip uninstall -y pip setuptools wheel \
+ && groupadd --system --gid 10001 app \
  && useradd --system --uid 10001 --gid app --no-create-home --shell /usr/sbin/nologin app
 WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
