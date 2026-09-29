@@ -11,7 +11,7 @@ locals {
 module "vpc" {
   # checkov:skip=CKV_TF_1:registry module pinned by version; .terraform.lock.hcl pins provider hashes
   source  = "terraform-aws-modules/vpc/aws"
-  version = "~> 5.16"
+  version = "~> 6.7"
 
   name = "${var.name}-vpc"
   cidr = "10.40.0.0/16"
