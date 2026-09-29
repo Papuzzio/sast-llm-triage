@@ -20,7 +20,7 @@ jobs:
     name: Terraform + manifest checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: hashicorp/setup-terraform@v3
       - name: terraform fmt
         run: terraform -chdir=infra/terraform fmt -check -recursive
@@ -39,7 +39,7 @@ jobs:
     name: Build and scan image
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Dependency audit (pip-audit)
         run: |
           pipx run pip-audit -r requirements-app.txt --strict
@@ -85,7 +85,7 @@ jobs:
       contents: read
       id-token: write # OIDC to AWS, and keyless cosign signing
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: AWS credentials via GitHub OIDC (no stored keys)
         uses: aws-actions/configure-aws-credentials@v4
         with:
