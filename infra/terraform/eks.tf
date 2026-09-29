@@ -3,7 +3,7 @@ data "aws_caller_identity" "current" {}
 module "eks" {
   # checkov:skip=CKV_TF_1:registry module pinned by version; .terraform.lock.hcl pins provider hashes
   source  = "terraform-aws-modules/eks/aws"
-  version = "~> 20.31"
+  version = "~> 21.26"
 
   cluster_name    = var.name
   cluster_version = var.kubernetes_version
