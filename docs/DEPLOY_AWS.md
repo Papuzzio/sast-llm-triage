@@ -121,6 +121,8 @@ cosign verify <ecr-url>@sha256:<digest> \
 
 Accepted scanner findings are skipped inline with a reason (`# checkov:skip=` / `checkov.io/skip`).
 
+Trivy has one accepted finding: the RSA private key in `data/juice-shop-src/lib/insecurity.ts`. It's OWASP Juice Shop's intentionally planted, publicly published key, and part of the test corpus the app triages. It's skipped for that one file only (see `ci.yml`).
+
 ## 7. Tear down
 
 ```bash

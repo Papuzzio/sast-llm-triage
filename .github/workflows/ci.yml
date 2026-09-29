@@ -61,6 +61,10 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: "1"
+          # Accepted finding: OWASP Juice Shop's intentionally hard-coded, publicly published RSA key.
+          # It is part of the SAST test corpus the app triages, not a credential. Scoped to this one file;
+          # secret scanning stays on for everything else.
+          skip-files: "app/data/juice-shop-src/lib/insecurity.ts,/app/data/juice-shop-src/lib/insecurity.ts"
       - name: SBOM (SPDX)
         uses: anchore/sbom-action@v0
         with:
